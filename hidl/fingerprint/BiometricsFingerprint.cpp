@@ -18,12 +18,93 @@
 
 #include "BiometricsFingerprint.h"
 
+#include <android/binder_manager.h>
+
+#include <aidl/android/hardware/power/IPower.h>
+#include <aidl/google/hardware/power/extension/pixel/IPowerExt.h>
+using ::aidl::android::hardware::power::IPower;
+using ::aidl::google::hardware::power::extension::pixel::IPowerExt;
+
 namespace android {
 namespace hardware {
 namespace biometrics {
 namespace fingerprint {
 namespace V2_3 {
 namespace implementation {
+
+constexpr char kBoostHint[] = "LAUNCH";
+constexpr int32_t kBoostDurationMs = 2000;
+
+int32_t BiometricsFingerprint::connectPowerHalExt() {
+    if (mPowerHalExtAidl) {
+        return android::NO_ERROR;
+    }
+    const std::string kInstance = std::string(IPower::descriptor) + "/default";
+    ndk::SpAIBinder pwBinder = ndk::SpAIBinder(AServiceManager_getService(kInstance.c_str()));
+    ndk::SpAIBinder pwExtBinder;
+    AIBinder_getExtension(pwBinder.get(), pwExtBinder.getR());
+    mPowerHalExtAidl = IPowerExt::fromBinder(pwExtBinder);
+    if (!mPowerHalExtAidl) {
+        return -EINVAL;
+    }
+    return android::NO_ERROR;
+}
+int32_t BiometricsFingerprint::checkPowerHalExtBoostSupport(const std::string &boost) {
+    if (boost.empty() || connectPowerHalExt() != android::NO_ERROR) {
+        return -EINVAL;
+    }
+    bool isSupported = false;
+    auto ret = mPowerHalExtAidl->isBoostSupported(boost.c_str(), &isSupported);
+    if (!ret.isOk()) {
+        if (ret.getExceptionCode() == EX_TRANSACTION_FAILED) {
+            /*
+             * PowerHAL service may crash due to some reasons, this could end up
+             * binder transaction failure. Set nullptr here to trigger re-connection.
+             */
+            mPowerHalExtAidl = nullptr;
+            return -ENOTCONN;
+        }
+        return -EINVAL;
+    }
+    if (!isSupported) {
+        return -EOPNOTSUPP;
+    }
+    return android::NO_ERROR;
+}
+int32_t BiometricsFingerprint::sendPowerHalExtBoost(const std::string &boost,
+                                                               int32_t durationMs) {
+    if (boost.empty() || connectPowerHalExt() != android::NO_ERROR) {
+        return -EINVAL;
+    }
+    auto ret = mPowerHalExtAidl->setBoost(boost.c_str(), durationMs);
+    if (!ret.isOk()) {
+        if (ret.getExceptionCode() == EX_TRANSACTION_FAILED) {
+            /*
+             * PowerHAL service may crash due to some reasons, this could end up
+             * binder transaction failure. Set nullptr here to trigger re-connection.
+             */
+            mPowerHalExtAidl = nullptr;
+            return -ENOTCONN;
+        }
+        return -EINVAL;
+    }
+    return android::NO_ERROR;
+}
+int32_t BiometricsFingerprint::isBoostHintSupported() {
+    int32_t ret = android::NO_ERROR;
+    if (mBoostHintSupportIsChecked) {
+        ret = mBoostHintIsSupported ? android::NO_ERROR : -EOPNOTSUPP;
+        return ret;
+    }
+    ret = checkPowerHalExtBoostSupport(kBoostHint);
+    if (ret == android::NO_ERROR) {
+        mBoostHintIsSupported = true;
+        mBoostHintSupportIsChecked = true;
+    } else if (ret == -EOPNOTSUPP) {
+        mBoostHintSupportIsChecked = true;
+    }
+    return ret;
+}
 
 BiometricsFingerprint::BiometricsFingerprint()
     : mOplusDisplayFd(open("/dev/oplus_display", O_RDWR)) {
@@ -85,6 +166,10 @@ Return<bool> BiometricsFingerprint::isUdfps(uint32_t sensorID) {
 }
 
 Return<void> BiometricsFingerprint::onFingerDown(uint32_t x, uint32_t y, float minor, float major) {
+    int32_t ret = isBoostHintSupported();
+    if (ret == android::NO_ERROR) {
+        ret = sendPowerHalExtBoost(kBoostHint, kBoostDurationMs);
+    }
     setFpPress(1);
     return isUff() ? Void() : mOplusBiometricsFingerprint->onFingerDown(x, y, minor, major);
 }

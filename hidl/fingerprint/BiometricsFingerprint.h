@@ -29,6 +29,20 @@
 #include <oplus/oplus_display_panel.h>
 #include <vendor/oplus/hardware/biometrics/fingerprint/2.1/IBiometricsFingerprint.h>
 
+namespace aidl {
+namespace google {
+namespace hardware {
+namespace power {
+namespace extension {
+namespace pixel {
+class IPowerExt;
+} // namespace pixel
+} // namespace extension
+} // namespace power
+} // namespace hardware
+} // namespace google
+} // namespace aidl
+
 namespace android {
 namespace hardware {
 namespace biometrics {
@@ -127,6 +141,14 @@ class BiometricsFingerprint : public IBiometricsFingerprint,
     bool setFpPress(unsigned int value) {
         return isUdfps() && ioctl(mOplusDisplayFd, PANEL_IOCTL_SET_FP_PRESS, &value) == 0;
     }
+
+    int32_t connectPowerHalExt();
+    int32_t checkPowerHalExtBoostSupport(const std::string &boost);
+    int32_t sendPowerHalExtBoost(const std::string &boost, int32_t durationMs);
+    int32_t isBoostHintSupported();
+    bool mBoostHintIsSupported;
+    bool mBoostHintSupportIsChecked;
+    std::shared_ptr<aidl::google::hardware::power::extension::pixel::IPowerExt> mPowerHalExtAidl;
 
     sp<IOplusBiometricsFingerprint> mOplusBiometricsFingerprint;
     sp<V2_1::IBiometricsFingerprintClientCallback> mClientCallback;
