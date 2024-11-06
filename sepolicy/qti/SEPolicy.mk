@@ -29,4 +29,10 @@ SYSTEM_EXT_PUBLIC_SEPOLICY_DIRS += \
     hardware/oplus/sepolicy/qti/public/common-um
 endif
 
+ifeq ($(TARGET_BOARD_PLATFORM),pineapple)
+    BOARD_SEPOLICY_M4DEFS += \
+        vendor_hal_drm_widevine_exec=hal_drm_widevine_exec \
+        vendor_hal_esepowermanager_qti_exec=hal_secure_element_default_exec
+endif
+
 include device/lineage/sepolicy/libperfmgr/sepolicy.mk
